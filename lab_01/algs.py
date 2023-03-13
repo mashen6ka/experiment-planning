@@ -1,5 +1,7 @@
 import numpy.random as nr
 from math import pi
+import enum
+from queue import PriorityQueue
 
 REQUEST_COUNT = 10000
 DELTA_T = 0.01
@@ -37,6 +39,7 @@ class RequestGenerator:
     self._timeGenerator = timeGenerator
     self._receivers = receivers
     self._next = 0
+    self._busy = False
     
     self.totalRequests = 0
     self.totalGenerationTime = 0
@@ -45,11 +48,20 @@ class RequestGenerator:
   def next(self):
     return self._next
 
-  def generateRequest(self, currTime):
-    self.totalRequests += 1
+  def startGeneration(self, currTime):
+    if self._busy: return False
+    self._busy = True
     duration = self.generateDuration()
     self._next = currTime + duration
     self.totalGenerationTime += duration
+    return True
+
+  def finishGeneration(self):
+    if not self._busy: return False
+    self._busy = False
+    self.totalRequests += 1
+    request = Request()
+    request.timeIn = self._next
     
     minQueueSize = self._receivers[0].queueSize
     minReceiverId = 0
@@ -58,9 +70,8 @@ class RequestGenerator:
         minQueueSize = receiver.queueSize
         minReceiverId = index
 
-    request = Request()
-    request.timeIn = self._next
     self._receivers[minReceiverId].pushRequest(request)
+    return self._receivers[minReceiverId]
 
   def generateDuration(self):
     return self._timeGenerator.randomTime()
@@ -71,6 +82,7 @@ class RequestProcessor:
     self._queue = []
     self._next = 0
     self._waitingTime = 0
+    self._busy = False
     
     self.totalRequests = 0
     self.totalProcessingTime = 0
@@ -90,9 +102,11 @@ class RequestProcessor:
 
   def pushRequest(self, request):
     self._queue.append(request)
-
-  def popRequest(self, currTime):
-    if len(self._queue) > 0 and self._queue[0].timeIn <= currTime:
+    
+  def startProcessing(self, currTime):
+    if self._busy: return False
+    if len(self._queue) > 0:
+      self._busy = True
       request = self._queue.pop(0)
       duration = self.generateDuration()
       self._next = currTime + duration
@@ -101,9 +115,14 @@ class RequestProcessor:
       self.totalWaitingTime += currTime - request.timeIn
       
       self.totalProcessingTime += duration
-      self.totalRequests += 1
-      
-      return request
+      return True
+    else: return False
+    
+  def finishProcessing(self):
+    if not self._busy: return False
+    self._busy = False
+    self.totalRequests += 1
+    return True
 
   def generateDuration(self):
     return self._timeGenerator.randomTime()
@@ -141,19 +160,46 @@ class Model:
   def __init__(self, generators, processors):
     self.generators = generators
     self.processors = processors
+    self._eventList = PriorityQueue()
+ 
+  class EventType(enum.Enum):
+    simulationFinished = 0
+    genFinished = 1
+    procFinished = 2
+    
+  class Event:
+    def __init__(self, time, type, block=None):
+      self.time = time
+      self.type = type
+      self.block = block
+      
+  def addEvent(self, eventNew):
+    self._eventList.put((eventNew.time, eventNew))
 
-  def simulate(self, maxTime):    
-    blocks = [*self.generators, *self.processors]
+  def simulateEventBased(self, maxTime):
+    self._eventList = PriorityQueue()
+    self.addEvent(self.Event(maxTime, self.EventType.simulationFinished))
 
-    currTime = 0
-    while currTime < maxTime:
-      for block in blocks:
-        if block.next <= currTime:
-          if isinstance(block, RequestGenerator):
-            block.generateRequest(currTime)
-          if isinstance(block, RequestProcessor):
-            block.popRequest(currTime)
-      currTime += DELTA_T
+    for generator in self.generators:
+      generator.startGeneration(0)
+      self.addEvent(self.Event(generator.next, self.EventType.genFinished, generator))
+    
+    while not self._eventList.empty():
+      _, event = self._eventList.get()
+      if event.type == self.EventType.simulationFinished: break
+      if event.type == self.EventType.genFinished:
+        generator = event.block
+        processor = generator.finishGeneration()
+        if (generator.startGeneration(event.time)):
+          self.addEvent(self.Event(generator.next, self.EventType.genFinished, generator))
+        
+        if (processor.startProcessing(event.time)):
+          self.addEvent(self.Event(processor.next, self.EventType.procFinished, processor))
+      if event.type == self.EventType.procFinished:
+        processor = event.block
+        processor.finishProcessing()
+        if (processor.startProcessing(event.time)):
+          self.addEvent(self.Event(processor.next, self.EventType.procFinished, processor))
       
     for processor in self.processors:
       processor.totalProcessingTime = min(processor.totalProcessingTime, maxTime)
@@ -161,14 +207,4 @@ class Model:
     for generator in self.generators:
       generator.totalProcessingTime = min(generator.totalGenerationTime, maxTime)
     
-    # print('Total generated: ', self.generators[0].totalRequests)
-    # print('Total generation time: ', self.generators[0].totalGenerationTime)
-    # print('Avg generation time: ', self.generators[0].totalGenerationTime / self.generators[0].totalRequests)
-    
-    # print('Total processed: ', self.processors[0].totalRequests)
-    # print('Total processing time: ', self.processors[0].totalProcessingTime)
-    # print('Avg processing time: ', self.processors[0].totalProcessingTime / self.processors[0].totalRequests)
-    # print('Avg waiting time: ', self.processors[0].totalWaitingTime / self.processors[0].totalRequests)
-    
     return ModellingResult(self.generators, self.processors)
-
