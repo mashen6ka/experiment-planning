@@ -103,12 +103,12 @@ def plot(graphics):
     print('Processed {:.0f}%'.format((i + 1) / len(systemLoadList) * 100))
     
     avgWaitingTimeList.append(totalRunsWaitingTime / runsNumber)
-  
-  print(systemLoadList, '\n')
-  print(avgWaitingTimeList)
-  
+
   systemLoadList.insert(0, 0)
   avgWaitingTimeList.insert(0, 0)
+  
+  print('\n', systemLoadList, '\n\n', avgWaitingTimeList)
+  
   graphics.plot(systemLoadList, avgWaitingTimeList)
 
 window = Tk()

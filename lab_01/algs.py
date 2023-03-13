@@ -38,30 +38,27 @@ class RequestGenerator:
   def __init__(self, timeGenerator, receivers = []):
     self._timeGenerator = timeGenerator
     self._receivers = receivers
-    self._next = 0
+    self._request = None
     self._busy = False
     
     self.totalRequests = 0
     self.totalGenerationTime = 0
-  
-  @property
-  def next(self):
-    return self._next
 
   def startGeneration(self, currTime):
-    if self._busy: return False
+    if self._busy: return None
     self._busy = True
     duration = self.generateDuration()
-    self._next = currTime + duration
+    next = currTime + duration
     self.totalGenerationTime += duration
-    return True
+    
+    self._request = Request()
+    self._request.timeIn = next
+    return next
 
   def finishGeneration(self):
-    if not self._busy: return False
+    if not self._busy: return None
     self._busy = False
     self.totalRequests += 1
-    request = Request()
-    request.timeIn = self._next
     
     minQueueSize = self._receivers[0].queueSize
     minReceiverId = 0
@@ -70,7 +67,7 @@ class RequestGenerator:
         minQueueSize = receiver.queueSize
         minReceiverId = index
 
-    self._receivers[minReceiverId].pushRequest(request)
+    self._receivers[minReceiverId].pushRequest(self._request)
     return self._receivers[minReceiverId]
 
   def generateDuration(self):
@@ -80,21 +77,12 @@ class RequestProcessor:
   def __init__(self, timeGenerator):
     self._timeGenerator = timeGenerator
     self._queue = []
-    self._next = 0
     self._waitingTime = 0
     self._busy = False
     
     self.totalRequests = 0
     self.totalProcessingTime = 0
     self.totalWaitingTime = 0
-  
-  @property
-  def next(self):
-    return self._next
-
-  @next.setter
-  def next(self, value):
-    self._next = value
   
   @property
   def queueSize(self):
@@ -104,25 +92,22 @@ class RequestProcessor:
     self._queue.append(request)
     
   def startProcessing(self, currTime):
-    if self._busy: return False
-    if len(self._queue) > 0:
-      self._busy = True
-      request = self._queue.pop(0)
-      duration = self.generateDuration()
-      self._next = currTime + duration
-      
-      request.timeOut = self._next
-      self.totalWaitingTime += currTime - request.timeIn
-      
-      self.totalProcessingTime += duration
-      return True
-    else: return False
+    if self._busy or len(self._queue) == 0: return None
+    self._busy = True
+    request = self._queue.pop(0)
+    duration = self.generateDuration()
+    next = currTime + duration
+    
+    request.timeOut = next
+    self.totalWaitingTime += currTime - request.timeIn
+    
+    self.totalProcessingTime += duration
+    return next
     
   def finishProcessing(self):
-    if not self._busy: return False
+    if not self._busy: return None
     self._busy = False
     self.totalRequests += 1
-    return True
 
   def generateDuration(self):
     return self._timeGenerator.randomTime()
@@ -181,25 +166,27 @@ class Model:
     self.addEvent(self.Event(maxTime, self.EventType.simulationFinished))
 
     for generator in self.generators:
-      generator.startGeneration(0)
-      self.addEvent(self.Event(generator.next, self.EventType.genFinished, generator))
+      next = generator.startGeneration(0)
+      self.addEvent(self.Event(next, self.EventType.genFinished, generator))
     
     while not self._eventList.empty():
       _, event = self._eventList.get()
       if event.type == self.EventType.simulationFinished: break
+      
       if event.type == self.EventType.genFinished:
         generator = event.block
         processor = generator.finishGeneration()
-        if (generator.startGeneration(event.time)):
-          self.addEvent(self.Event(generator.next, self.EventType.genFinished, generator))
+        next = generator.startGeneration(event.time)
+        if (next): self.addEvent(self.Event(next, self.EventType.genFinished, generator))
         
-        if (processor.startProcessing(event.time)):
-          self.addEvent(self.Event(processor.next, self.EventType.procFinished, processor))
+        next = processor.startProcessing(event.time)
+        if (next): self.addEvent(self.Event(next, self.EventType.procFinished, processor))
+
       if event.type == self.EventType.procFinished:
         processor = event.block
         processor.finishProcessing()
-        if (processor.startProcessing(event.time)):
-          self.addEvent(self.Event(processor.next, self.EventType.procFinished, processor))
+        next = processor.startProcessing(event.time)
+        if (next): self.addEvent(self.Event(next, self.EventType.procFinished, processor))
       
     for processor in self.processors:
       processor.totalProcessingTime = min(processor.totalProcessingTime, maxTime)
