@@ -4,8 +4,8 @@ from algs import Model, UniformTimeGenerator, RayleighTimeGenerator, Exponential
 from dataclasses import dataclass
 from itertools import combinations, product
 
-GEN_TIME_GENERATOR_TYPE = ExponentialTimeGenerator
-PROC_TIME_GENERATOR_TYPE = ExponentialTimeGenerator
+GEN_TIME_GENERATOR_TYPE = NormalTimeGenerator
+PROC_TIME_GENERATOR_TYPE = NormalTimeGenerator
 
 ONE_PARAM_GENERATOR_TYPES = [RayleighTimeGenerator, ExponentialTimeGenerator, WeibullTimeGenerator]
 TWO_PARAMS_GENERATOR_TYPES = [UniformTimeGenerator, NormalTimeGenerator]
@@ -13,6 +13,7 @@ TWO_PARAMS_GENERATOR_TYPES = [UniformTimeGenerator, NormalTimeGenerator]
 XMATRIX_CELL_WIDTH = 7
 YMATRIX_CELL_WIDTH = 6
 NUMBER_CELL_WIDTH = 2
+ENTRY_CELL_WIDTH = 4
 
 LABEL_CELL_COLOR = "gray87"
 COMMON_CELL_COLOR = "white"
@@ -25,7 +26,7 @@ def countFactorsByGeneratorType(genType):
 @dataclass
 class Combination:
 	elems: tuple[int]
-	value: list[int]
+	value: any
 
 	def __init__(self, elems, value):
 		self.elems = elems
@@ -55,13 +56,18 @@ class YMatrix:
 	colsCount: int
 	rowsCount: int
 
-	def __init__(self, factorsCount: int):
+	rowMode: bool
+
+	def __init__(self, factorsCount: int, rowMode: bool = False):
 		self.y = self.yLinear = self.yNonLinear = self.deltaLinear = self.deltaNonLinear = []
 		self.factorsCount = factorsCount
 
 		self.labels = ['y', 'y_lin', 'y_nlin', 'Δy_lin', 'Δy_nlin']
 		self.colsCount = len(self.labels)
-		self.rowsCount = 2 ** factorsCount
+
+		self.rowMode = rowMode
+		if rowMode: self.rowsCount = 1
+		else: self.rowsCount = 2 ** factorsCount
 
 	def calculateY(self, factorMatrix: list[list[int]], time: int, genTimeGeneratorType: any, procTimeGeneratorType: any):
 		self.y = []
@@ -139,28 +145,51 @@ class XMatrix:
 	colsCount: int
 	rowsCount: int
 
-	def __init__(self, factorsCount):
+	rowMode: bool
+
+	def __init__(self, factorsCount: int, rowMode: bool = False):
 		self.factorsCount = factorsCount
+		self.colsCount = 2 ** factorsCount
+		if rowMode: self.rowsCount = 1
+		else: self.rowsCount = 2 ** factorsCount
+
+		self.rowMode = rowMode
+		# if not rowMode:
+		self.__initMain()
+		self.__initCombs()
+		self.__initFull()
+
+		self.__initLabels()
+
+	def __initMain(self):
 		self.main = []
+		if self.rowMode:
+			for i in range(self.factorsCount + 1):
+				if i == 0: val = [1]
+				else: val = [None]
+				self.main.append(val)
+		else:
+			prod = list(product([-1, 1], repeat=self.factorsCount))
+			for i in range(self.factorsCount + 1):
+				if i == 0:
+					val = [1 for j in range(2 ** self.factorsCount)]
+				else:
+					val = [p[i-1] for p in prod]
+				self.main.append(val)
+	
+	def __initCombs(self):
 		self.combs = []
-		self.colsCount = self.rowsCount = 2 ** factorsCount
-
-		prod = list(product([-1, 1], repeat=factorsCount))
-		for i in range(factorsCount + 1):
-			if i == 0:
-				val = [1 for j in range(2 ** factorsCount)]
-			else:
-				val = [p[i-1] for p in prod]
-			self.main.append(val)
-
-		idx = [i + 1 for i in range(factorsCount)]
-		combs = list(combinations(idx, 2)) + \
-			list(combinations(idx, 3)) + list(combinations(idx, 4))
+		idx = [i + 1 for i in range(self.factorsCount)]
+		combs = list(combinations(idx, 2)) + list(combinations(idx, 3)) + list(combinations(idx, 4))
 		for comb in combs:
 			val = []
 			for elem in comb:
 				val = multTwoLists(val, self.main[elem])
 			self.combs.append(Combination(comb, val))
+
+	def __initLabels(self):
+		idx = [i + 1 for i in range(self.factorsCount)]
+		combs = list(combinations(idx, 2)) + list(combinations(idx, 3)) + list(combinations(idx, 4))
 
 		self.labels = ['x' + str(i) for i in range(self.factorsCount + 1)]
 		for comb in combs:
@@ -169,11 +198,23 @@ class XMatrix:
 				label += 'x' + str(elem)
 			self.labels.append(label)
 
+	def __initFull(self):
 		self._full = []
 		for col in self.main:
 			self._full.append(col)
 		for comb in self.combs:
 			self._full.append(comb.value)
+
+	def setRowFactors(self, normFactors: list[float]):
+		print('norm:', self.factorsCount, normFactors)
+		self.main = []
+		for i in range(self.factorsCount + 1):
+			if i == 0: val = [1]
+			else: val = [f[i-1] for f in normFactors]
+			print(self.main)
+			self.main.append(val)
+		self.__initCombs()
+		self.__initFull()
 
 	# вся матрица целиком (объединение одиночных столбцов и столбцов-комбинаций)
 	def full(self):
@@ -197,14 +238,14 @@ def multTwoLists(list1: list[int], list2: list[int]):
 		return list2
 	if len(list2) == 0:
 		return list1
-	return [elem1 * elem2 for elem1, elem2 in zip(list1, list2)]
+	return [elem1 * elem2 if elem1 != None and elem2 != None else None for elem1, elem2 in zip(list1, list2)]
 
 def subtractTwoLists(list1: list[int], list2: list[int]):
 	if len(list1) == 0:
 		return list2
 	if len(list2) == 0:
 		return list1
-	return [elem1 - elem2 for elem1, elem2 in zip(list1, list2)]
+	return [elem1 - elem2 if elem1 != None and elem2 != None else None for elem1, elem2 in zip(list1, list2)]
 
 @dataclass
 class PlanningMatrix:
@@ -223,9 +264,10 @@ class PlanningMatrix:
 	xMatrix: XMatrix
 	yMatrix: YMatrix
 	normFactorMatrix: list[list[int]]
-	naturFactorMatrix: list[list[int]]
+	naturFactorMatrix: list[list[float]]
 
-	intervals: list[float]
+	intervals: list[Interval]
+	points: list[float]
 
 	xFields: list[Entry]
 	yFields: list[Entry]
@@ -233,18 +275,22 @@ class PlanningMatrix:
 	genTimeGeneratorType: any
 	procTimeGeneratorType: any
 
-	def __init__(self, genTimeGeneratorType: any, procTimeGeneratorType: any):
+	rowMode: bool
+
+	def __init__(self, genTimeGeneratorType: any, procTimeGeneratorType: any, rowMode: bool = False):
 		self.factorsCount = countFactorsByGeneratorType(genTimeGeneratorType) + countFactorsByGeneratorType(procTimeGeneratorType)
 		self.xColsCount = 2 ** self.factorsCount
 		self.yColsCount = 5
-		self.rowsCount = 2 ** self.factorsCount + 1
+
+		self.rowMode = rowMode
+		if rowMode: self.rowsCount = 1
+		else: self.rowsCount = 2 ** self.factorsCount + 1
 
 		self.genTimeGeneratorType = genTimeGeneratorType
 		self.procTimeGeneratorType = procTimeGeneratorType
 
-		self.xMatrix = XMatrix(self.factorsCount)
-		self.normFactorMatrix = self.xMatrix.factor()
-		self.yMatrix = YMatrix(self.factorsCount)
+		self.xMatrix = XMatrix(factorsCount=self.factorsCount, rowMode=rowMode)
+		self.yMatrix = YMatrix(factorsCount=self.factorsCount, rowMode=rowMode)
 
 	def grid(self, window, column=0, row=0, columnspan=1, rowspan=1, padx=0, pady=0):
 		self.window = window
@@ -268,7 +314,7 @@ class PlanningMatrix:
 		if value != None:
 			cell.insert(0, str(value))
 		cell.config(state='readonly', readonlybackground=color)
-		cell.grid(row=row, column=column, sticky=EW, padx=0, pady=0)
+		cell.grid(row=row, column=column, sticky=NSEW, padx=0, pady=0)
 		return cell
 
 	def __createXLabels(self):
@@ -286,6 +332,11 @@ class PlanningMatrix:
 				value = i
 			self.__createCell(
 				row=i, column=0, width=NUMBER_CELL_WIDTH, color=LABEL_CELL_COLOR, value=value)
+
+	def __destroyXFields(self):
+		for i in range(len(self.xFields)):
+			for j in range(len(self.xFields[0])):
+				self.xFields[i][j].destroy()
 
 	def __createXFields(self):
 		self.xFields = []
@@ -328,25 +379,53 @@ class PlanningMatrix:
 				col.append(cell)
 			self.yFields.append(col)
 
-	def __makeNormFactorMatrixNatural(self, normFactorMatrix):
+	def __makeNormalFactorMatrixNatural(self, normFactorMatrix):
 		naturFactorMatrix = []
+		# print(normFactorMatrix)
 		for i in range(len(normFactorMatrix)):
 			row = []
 			for j in range(len(normFactorMatrix[0])):
 				normValue = normFactorMatrix[i][j]
-				if normValue == -1:
-					naturValue = self.intervals[j].min
-				elif normValue == 1:
-					naturValue = self.intervals[j].max
+				if normValue == -1: naturValue = self.intervals[j].min
+				elif normValue == 1: naturValue = self.intervals[j].max
 				row.append(naturValue)
 			naturFactorMatrix.append(row)
 		return naturFactorMatrix
+	
+	def __makeNaturalFactorMatrixNormal(self, naturFactorMatrix):
+		normFactorMatrix = []
+		for i in range(len(naturFactorMatrix)):
+			row = []
+			for j in range(len(naturFactorMatrix[0])):
+				naturValue = naturFactorMatrix[i][j]
+				left = self.intervals[j].min
+				right = self.intervals[j].max
+				length =  right - left
+				middle = left + length / 2
+				normValue = (naturValue - middle) / (length / 2)
+				row.append(normValue)
+			normFactorMatrix.append(row)
+		return normFactorMatrix
 
-	def setFactorsIntervals(self, intervals: list[Interval]):
+	def setFactors(self, intervals: list[Interval], points: list[float] = None):
+		if len(intervals) != self.factorsCount: raise('Incorrect number of intervals. Factors number = ', self.factorsCount)
 		self.intervals = intervals
-		self.naturFactorMatrix = self.__makeNormFactorMatrixNatural(
-			self.normFactorMatrix)
+		if self.rowMode:
+			if points == None: raise('Points values not found. Pass them or turn the rowMode off')
+			if len(points) != self.factorsCount: raise('Incorrect number of points. Factors number = ', self.factorsCount)
 
+			self.points = points
+			self.naturFactorMatrix = [points]
+
+			self.normFactorMatrix = self.__makeNaturalFactorMatrixNormal(self.naturFactorMatrix)
+			self.xMatrix.setRowFactors(self.normFactorMatrix)
+			self.__destroyXFields()
+			self.__createXFields()
+
+		if not self.rowMode:
+			self.normFactorMatrix = self.xMatrix.factor()
+			self.naturFactorMatrix = self.__makeNormalFactorMatrixNatural(self.normFactorMatrix)
+		
 	def calculateNormNonLinearCoefs(self):
 		coefs = []
 		for j in range(self.xMatrix.colsCount):
@@ -368,7 +447,6 @@ class PlanningMatrix:
 		self.yMatrix.calculateDeltaLinear()
 		self.yMatrix.calculateDeltaNonLinear()
 		self.__createYFields()
-
 
 @dataclass
 class IntervalDataBlock:
@@ -403,7 +481,7 @@ class IntervalDataBlock:
 		self.window = window
 		self.column, self.row, self.columnspan, self.rowspan, self.padx, self.pady = column, row, columnspan, rowspan, padx, pady
 
-		self.frame = self.__createFrame(window, row=row, column=column, rowspan=rowspan, columnspan=columnspan)
+		self.frame = self.__createFrame(window, row=row, column=column, rowspan=rowspan, columnspan=columnspan, text="Интервал:")
 
 		self.genIntensityField = self.genRangeField = self.procIntensityField = self.procRangeField = None
 
@@ -444,7 +522,7 @@ class IntervalDataBlock:
 			print(self.genIntensityField, self.procIntensityField, self.genRangeField, self.procRangeField)
 
 	def __createEntry(self, window, row=0, column=0, sticky=NSEW, value=None):
-		entry = Entry(window, width=10)
+		entry = Entry(window, width=ENTRY_CELL_WIDTH)
 		if value != None: entry.insert(0, str(value))
 		entry.grid(row=row, column=column, sticky=sticky)
 		return entry
@@ -500,15 +578,123 @@ class IntervalDataBlock:
 
 @dataclass
 class PointDataBlock:
-	pass
+	frame: Frame
+	column: int
+	row: int
+	columnspan: int
+	rowspan: int
+	padx: int
+	pady: int
+	window: any
+
+	genTimeGeneratorType: any
+	procTimeGeneratorType: any
+
+	genFactorsCount: int
+	procFactorsCount: int
+
+	genIntensityField: Entry
+	genRangeField: Entry
+	procIntensityField: Entry
+	prcoRangeField: Entry
+
+	def __init__(self, genTimeGeneratorType: any, procGeneratorType: any):
+		self.genTimeGeneratorType = genTimeGeneratorType
+		self.procGeneratorType = procGeneratorType
+
+		self.genFactorsCount = countFactorsByGeneratorType(genTimeGeneratorType)
+		self.procFactorsCount = countFactorsByGeneratorType(procGeneratorType)
+
+	def grid(self, window, row=0, column=0, columnspan=1, rowspan=1, padx=0, pady=0):
+		self.window = window
+		self.column, self.row, self.columnspan, self.rowspan, self.padx, self.pady = column, row, columnspan, rowspan, padx, pady
+
+		self.frame = self.__createFrame(window, row=row, column=column, rowspan=rowspan, columnspan=columnspan, text="Точка:")
+
+		self.genIntensityField = self.genRangeField = self.procIntensityField = self.procRangeField = None
+
+		timeGeneratorsTypes = [self.genTimeGeneratorType, self.procGeneratorType]
+		for i, type in enumerate(timeGeneratorsTypes):
+			if i == 0: frameText = "Поступление заявок:"
+			elif i == 1: frameText = "Обработка заявок:"
+			frame = self.__createFrame(self.frame, row=1, column=i+1, text=frameText)
+
+			label = self.__getTimeGeneratorLabel(type)
+
+			lblDistribution = Label(frame, text=label, font=('', 13, "italic"))
+			lblDistribution.grid(row=0, column=i, columnspan=3, sticky=EW)
+
+			lblIntensity = Label(frame, text="Интенсивность:")
+			lblIntensity.grid(row=2, column=i, sticky=W)
+
+			lblIntensityMin = Label(frame, text="x:")
+			lblIntensityMin.grid(row=1, column=i+1, sticky=EW)
+
+			txtIntensity = self.__createEntry(frame, row=2, column=i+1, sticky=EW)
+			if i == 0: self.genIntensityField = txtIntensity
+			elif i == 1: self.procIntensityField = txtIntensity
+
+			if (countFactorsByGeneratorType(type) == 2):
+				lblRange = Label(frame, text="Разброс интенсивности:")
+				lblRange.grid(row=3, column=i, sticky=W)
+
+				txtRange = self.__createEntry(frame, row=3, column=i+1, sticky=EW)
+				if i == 0: self.genRangeField = txtRange
+				elif i == 1: self.procRangeField = txtRange
+
+	def __createEntry(self, window, row=0, column=0, sticky=NSEW, value=None):
+		entry = Entry(window, width=ENTRY_CELL_WIDTH)
+		if value != None: entry.insert(0, str(value))
+		entry.grid(row=row, column=column, sticky=sticky)
+		return entry
+			
+	def __createFrame(self, window, row=0, column=0, columnspan=1, rowspan=1, text=None):
+		if text != None: frame = LabelFrame(window, text=text)
+		else: frame = Frame(window)
+
+		frame.grid(row=row, column=column, columnspan=columnspan, rowspan=rowspan, sticky=NS, padx=10, pady=10)
+		frame.grid_rowconfigure(0, weight=1)
+		frame.grid_columnconfigure(0, weight=1)
+
+		return frame
+		
+	def __getTimeGeneratorLabel(self, timeGeneratorType: any):
+		if timeGeneratorType is NormalTimeGenerator: return 'Нормальный закон'
+		elif timeGeneratorType is ExponentialTimeGenerator: return 'Экспоненциальный закон'
+		elif timeGeneratorType is UniformTimeGenerator: return 'Равномерный закон'
+		elif timeGeneratorType is WeibullTimeGenerator: return 'Закон Вейбулла'
+		elif timeGeneratorType is RayleighTimeGenerator: return 'Закон Рэлея'
+
+	def factors(self):
+		factors = []
+		for field in [self.genIntensityField, self.procIntensityField, self.genRangeField, self.procRangeField]:
+			if field != None:
+				if field[0].get() != "" and field[1].get() != "":
+					factors.append(float(field.get()))
+				else:
+					factors.append(None)
+		return factors
+	
+	def setGenFactors(self, intensity: Interval, range: Interval = None):
+		self.genIntensityField.delete(0, END)
+		self.genIntensityField.insert(0, str(intensity))
+		if self.genRangeField != None:
+			self.genRangeField.delete(0, END)
+			self.genRangeField.insert(0, str(range))
+
+	def setProcFactors(self, intensity: Interval, range: Interval = None):
+		self.procIntensityField.delete(0, END)
+		self.procIntensityField.insert(0, str(intensity))
+		if self.procRangeField != None:
+			self.procRangeField.delete(0, END)
+			self.procRangeField.insert(0, str(range))
 
 
-def calcInterval(planningMatrix):
+def calculateInterval(planningMatrix):
 	planningMatrix.calculateInterval()
 
-
-def calcPoint():
-	pass
+# def calculatePoint(planniMatrix):
+# 	pass
 
 
 window = Tk()
@@ -516,24 +702,106 @@ window = Tk()
 window.title('Лабораторная работа №2')
 window.resizable(False, False)
 
-intervalDataBlock1 = IntervalDataBlock(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
-intervalDataBlock1.grid(window=window, row=1, column=1, rowspan=1, columnspan=2)
-intervalDataBlock1.setGenFactors(Interval(1, 20))
-intervalDataBlock1.setProcFactors(Interval(50, 100))
-				 
-mtrx2 = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
-mtrx2.grid(window=window, row=1, column=0)
-mtrx2.setFactorsIntervals([Interval(1, 20), Interval(50, 100)])
-calcInterval(mtrx2)
+intervalDataBlock = IntervalDataBlock(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
+intervalDataBlock.grid(window=window, row=0, column=0, rowspan=1)
 
-mtrx3 = PlanningMatrix(RayleighTimeGenerator, UniformTimeGenerator)
-mtrx3.grid(window=window, row=2, column=0)
-mtrx3.setFactorsIntervals([Interval(1, 20), Interval(50, 100), Interval(5, 10)])
-calcInterval(mtrx3)
+pointDataBlock = PointDataBlock(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
+pointDataBlock.grid(window=window, row=0, column=1, rowspan=1)
 
-mtrx4 = PlanningMatrix(UniformTimeGenerator, UniformTimeGenerator)
-mtrx4.grid(window=window, row=3, column=0)
-mtrx4.setFactorsIntervals([Interval(1, 20), Interval(50, 100), Interval(5, 10), Interval(5, 10)])
-calcInterval(mtrx4)
+genTimeGeneratorParamsCount = 1 if GEN_TIME_GENERATOR_TYPE in ONE_PARAM_GENERATOR_TYPES else 2
+procTimeGeneratorParamsCount = 1 if PROC_TIME_GENERATOR_TYPE in ONE_PARAM_GENERATOR_TYPES else 2
+
+if genTimeGeneratorParamsCount == 1 and procTimeGeneratorParamsCount == 1:
+	intervals = [Interval(1, 10), Interval(15, 90)]
+	points = [i.min + (i.max - i.min) / 2 for i in intervals]
+
+	intervalDataBlock.setGenFactors(intensity=intervals[0])
+	intervalDataBlock.setProcFactors(intensity=intervals[1])
+
+	pointDataBlock.setGenFactors(points[0])
+	pointDataBlock.setProcFactors(points[1])
+elif genTimeGeneratorParamsCount == 1 and procTimeGeneratorParamsCount == 2:
+	intervals = [Interval(1, 10), Interval(15, 90), Interval(5, 10)]
+	points = [i.min + (i.max - i.min) / 2 for i in intervals]
+
+	intervalDataBlock.setGenFactors(intensity=intervals[0])
+	intervalDataBlock.setProcFactors(intensity=intervals[1], range=intervals[2])
+
+	pointDataBlock.setGenFactors(points[0])
+	pointDataBlock.setProcFactors(points[1], points[2])
+elif genTimeGeneratorParamsCount == 2 and procTimeGeneratorParamsCount == 1:
+	intervals = [Interval(1, 10), Interval(15, 90), Interval(5, 10)]
+	points = [i.min + (i.max - i.min) / 2 for i in intervals]
+
+	intervalDataBlock.setGenFactors(intensity=intervals[0], range=intervals[2])
+	intervalDataBlock.setProcFactors(intensity=intervals[1])
+
+	pointDataBlock.setGenFactors(points[0], points[2])
+	pointDataBlock.setProcFactors(points[1])
+elif genTimeGeneratorParamsCount == 2 and procTimeGeneratorParamsCount == 2:
+	intervals = [Interval(1, 10), Interval(15, 90), Interval(5, 10), Interval(5, 10)]
+	points = [i.min + (i.max - i.min) / 2 for i in intervals]
+
+	intervalDataBlock.setGenFactors(intensity=intervals[0], range=intervals[2])
+	intervalDataBlock.setProcFactors(intensity=intervals[1], range=intervals[3])
+
+	pointDataBlock.setGenFactors(points[0], points[2])
+	pointDataBlock.setProcFactors(points[1], points[3])
+
+mtrx = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
+mtrx.grid(window=window, row=3, column=0, columnspan=2)
+mtrx.setFactors(intervals=intervals)
+calculateInterval(mtrx)
+
+
+mtrxRow = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE, True)
+mtrxRow.grid(window=window, row=4, column=0, columnspan=2)
+mtrxRow.setFactors(intervals=intervals, points=points)
+calculateInterval(mtrxRow)
+				
+# mtrx2 = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
+# mtrx2.grid(window=window, row=1, column=0, columnspan=2)
+# mtrx2.setFactors([Interval(1, 20), Interval(50, 100)])
+# calculateInterval(mtrx2)
+
+# mtrx2Row = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE, True)
+# mtrx2Row.grid(window=window, row=2, column=0, columnspan=2)
+# mtrx2Row.setFactors([Interval(1, 20), Interval(50, 100)], [10.5, 75])
+# calculateInterval(mtrx2Row)
+
+
+# intervals = [Interval(1, 10), Interval(15, 90), Interval(5, 10)]
+# points = [i.min + (i.max - i.min) / 2 for i in intervals]
+
+
+# intervalDataBlock3 = IntervalDataBlock(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
+# intervalDataBlock3.grid(window=window, row=0, column=0, rowspan=1)
+# intervalDataBlock3.setGenFactors(intensity=intervals[0])
+# intervalDataBlock3.setProcFactors(intensity=intervals[1], range=intervals[2])
+
+# pointDataBlock3 = PointDataBlock(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
+# pointDataBlock3.grid(window=window, row=0, column=1, rowspan=1)
+# pointDataBlock3.setGenFactors(points[0])
+# pointDataBlock3.setProcFactors(points[1], points[2])
+
+# mtrx3 = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
+# mtrx3.grid(window=window, row=3, column=0, columnspan=2)
+# mtrx3.setFactors(intervals=intervals)
+# calculateInterval(mtrx3)
+
+# mtrx3Row = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE, True)
+# mtrx3Row.grid(window=window, row=4, column=0, columnspan=2)
+# mtrx3Row.setFactors(intervals=intervals, points=points)
+# calculateInterval(mtrx3Row)
+
+# mtrx4 = PlanningMatrix(UniformTimeGenerator, UniformTimeGenerator)
+# mtrx4.grid(window=window, row=5, column=0, columnspan=2)
+# mtrx4.setFactors([Interval(1, 20), Interval(50, 100), Interval(5, 10), Interval(5, 10)])
+# calculateInterval(mtrx4)
+
+# mtrx4Row = PlanningMatrix(UniformTimeGenerator, UniformTimeGenerator, True)
+# mtrx4Row.grid(window=window, row=6, column=0, columnspan=2)
+# mtrx4Row.setFactors([Interval(1, 20), Interval(50, 100), Interval(5, 10), Interval(5, 10)], [10.5, 75, 7.5, 7.5])
+# calculateInterval(mtrx4Row)
 
 window.mainloop()
