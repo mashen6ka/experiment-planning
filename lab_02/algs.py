@@ -7,9 +7,9 @@ REQUEST_COUNT = 10000
 DELTA_T = 0.01
 
 class UniformTimeGenerator:
-  def __init__(self, intensity, range):
-    self._a = 1 / intensity - range
-    self._b = 1 / intensity + range
+  def __init__(self, intensity, intensityRange):
+    self._a = 1 / intensity - 1 / intensityRange
+    self._b = 1 / intensity + 1 / intensityRange
 
   def randomTime(self):
     return nr.uniform(self._a, self._b)
@@ -22,9 +22,9 @@ class RayleighTimeGenerator:
     return nr.rayleigh(self._sigma)
   
 class NormalTimeGenerator:
-  def __init__(self, intensity, range):
+  def __init__(self, intensity, intensityRange):
     self._i = 1 / intensity
-    self._range = range
+    self._range = 1 / intensityRange
 
   def randomTime(self):
     return nr.normal(self._i, self._range)

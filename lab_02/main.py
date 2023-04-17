@@ -4,8 +4,8 @@ from algs import Model, UniformTimeGenerator, RayleighTimeGenerator, Exponential
 from dataclasses import dataclass
 from itertools import combinations, product
 
-GEN_TIME_GENERATOR_TYPE = NormalTimeGenerator
-PROC_TIME_GENERATOR_TYPE = NormalTimeGenerator
+GEN_TIME_GENERATOR_TYPE = RayleighTimeGenerator
+PROC_TIME_GENERATOR_TYPE = UniformTimeGenerator
 
 ONE_PARAM_GENERATOR_TYPES = [RayleighTimeGenerator, ExponentialTimeGenerator, WeibullTimeGenerator]
 TWO_PARAMS_GENERATOR_TYPES = [UniformTimeGenerator, NormalTimeGenerator]
@@ -18,10 +18,17 @@ ENTRY_CELL_WIDTH = 4
 LABEL_CELL_COLOR = "gray87"
 COMMON_CELL_COLOR = "white"
 
+EQUATION_LABELS = ["Линейное нормированное: ", "Нелинейное нормированное: ", "Линейное натуральное: ", "Нелинейное натуральное: "]
+
+EQUATION_X_FOREGROUND = "black"
+EQUATION_COEF_FOREGROUND = "blue"
+EQUATION_X_BACKGROUND = "white"
+EQUATION_COEF_BACKGROUND = "white"
+EQUATION_FONT = ('Courier', 15, 'bold')
+
 def countFactorsByGeneratorType(genType):
 	if genType in ONE_PARAM_GENERATOR_TYPES: return 1
 	elif genType in TWO_PARAMS_GENERATOR_TYPES: return 2
-
 
 @dataclass
 class Combination:
@@ -206,12 +213,10 @@ class XMatrix:
 			self._full.append(comb.value)
 
 	def setRowFactors(self, normFactors: list[float]):
-		print('norm:', self.factorsCount, normFactors)
 		self.main = []
 		for i in range(self.factorsCount + 1):
 			if i == 0: val = [1]
 			else: val = [f[i-1] for f in normFactors]
-			print(self.main)
 			self.main.append(val)
 		self.__initCombs()
 		self.__initFull()
@@ -266,6 +271,11 @@ class PlanningMatrix:
 	normFactorMatrix: list[list[int]]
 	naturFactorMatrix: list[list[float]]
 
+	normLinearCoefs: list[float]
+	normNonLinearCoefs: list[float]
+	naturLinearCoefs: list[float]
+	normNonLinearCoefs: list[float]
+
 	intervals: list[Interval]
 	points: list[float]
 
@@ -297,8 +307,7 @@ class PlanningMatrix:
 		self.column, self.row, self.columnspan, self.rowspan, self.padx, self.pady = column, row, columnspan, rowspan, padx, pady
 
 		self.frame = Frame(window)
-		self.frame.grid(row=row, column=column, rowspan=rowspan,
-						columnspan=columnspan, sticky=NS, padx=10, pady=10)
+		self.frame.grid(row=row, column=column, rowspan=rowspan, columnspan=columnspan, sticky=NS, padx=10, pady=10)
 		self.frame.grid_rowconfigure(0, weight=1)
 		self.frame.grid_columnconfigure(0, weight=1)
 
@@ -309,8 +318,7 @@ class PlanningMatrix:
 		self.__createYFields()
 
 	def __createCell(self, row: int, column: int, width: int, color: str, value=None):
-		cell = Entry(self.frame, highlightthickness=1,
-					 relief=FLAT, justify=CENTER, width=width)
+		cell = Entry(self.frame, highlightthickness=1, relief=FLAT, justify=CENTER, width=width)
 		if value != None:
 			cell.insert(0, str(value))
 		cell.config(state='readonly', readonlybackground=color)
@@ -320,23 +328,28 @@ class PlanningMatrix:
 	def __createXLabels(self):
 		for j, label in enumerate(self.xMatrix.labels):
 			# для ширины колонок по длине содержимого (x-колонки):
-			colWidth = len(label)
+			colWidth = len(label) + 1
 			# для фиксированной ширины колонок (x-колонки):
 			# colWidth = XMATRIX_CELL_WIDTH
-			self.__createCell(row=0, column=j+1, width=colWidth,
-							  color=LABEL_CELL_COLOR, value=label)
+			self.__createCell(row=0, column=j+1, width=colWidth, color=LABEL_CELL_COLOR, value=label)
 
 		for i in range(self.xMatrix.rowsCount + 1):
 			value = None
 			if i != 0:
 				value = i
-			self.__createCell(
-				row=i, column=0, width=NUMBER_CELL_WIDTH, color=LABEL_CELL_COLOR, value=value)
+			self.__createCell(row=i, column=0, width=NUMBER_CELL_WIDTH, color=LABEL_CELL_COLOR, value=value)
 
 	def __destroyXFields(self):
 		for i in range(len(self.xFields)):
 			for j in range(len(self.xFields[0])):
 				self.xFields[i][j].destroy()
+
+	def __clearXFields(self):
+		for i in range(len(self.xFields)):
+			for j in range(len(self.xFields[0])):
+				self.xFields[i][j].config(state='normal', readonlybackground=COMMON_CELL_COLOR)
+				self.xFields[i][j].delete(0, END)
+				self.xFields[i][j].config(state='readonly', readonlybackground=COMMON_CELL_COLOR)
 
 	def __createXFields(self):
 		self.xFields = []
@@ -344,15 +357,32 @@ class PlanningMatrix:
 			col = []
 			colWidth = len(self.xMatrix.labels[j])
 			for i in range(self.xMatrix.rowsCount):
-				cell = self.__createCell(
-					row=i+1, column=j+1, width=colWidth, color=COMMON_CELL_COLOR, value=self.xMatrix.full()[j][i])
+				cell = self.__createCell(row=i+1, column=j+1, width=colWidth, color=COMMON_CELL_COLOR, value=self.xMatrix.full()[j][i])
 				col.append(cell)
-		self.xFields.append(col)
+			self.xFields.append(col)
+
+	def __updateXFields(self):
+		for j in range(self.xMatrix.colsCount):
+			for i in range(self.xMatrix.rowsCount):
+				value = self.xMatrix.full()[j][i]
+				self.xFields[j][i].config(state='normal', readonlybackground=COMMON_CELL_COLOR)
+				self.xFields[j][i].delete(0, END)
+				if self.rowMode:
+					value = round(value, 2)
+				self.xFields[j][i].insert(0, value)
+				self.xFields[j][i].config(state='readonly', readonlybackground=COMMON_CELL_COLOR)
 
 	def __destroyYFields(self):
 		for i in range(len(self.yFields)):
 			for j in range(len(self.yFields[0])):
 				self.yFields[i][j].destroy()
+	
+	def __clearYFields(self):
+		for i in range(len(self.yFields)):
+			for j in range(len(self.yFields[0])):
+				self.yFields[i][j].config(state='normal', readonlybackground=COMMON_CELL_COLOR)
+				self.yFields[i][j].delete(0, END)
+				self.yFields[i][j].config(state='readonly', readonlybackground=COMMON_CELL_COLOR)
 
 	def __createYLabels(self):
 		offset = self.xMatrix.colsCount
@@ -361,8 +391,7 @@ class PlanningMatrix:
 			# colWidth = len(label)
 			# для фиксированной ширины колонок (y-колонки):
 			colWidth = YMATRIX_CELL_WIDTH
-			self.__createCell(row=0, column=j+1+offset,
-							  width=colWidth, color=LABEL_CELL_COLOR, value=label)
+			self.__createCell(row=0, column=j+1+offset, width=colWidth, color=LABEL_CELL_COLOR, value=label)
 
 	def __createYFields(self):
 		offset = self.xMatrix.colsCount
@@ -374,14 +403,23 @@ class PlanningMatrix:
 				value = None
 				if len(self.yMatrix.full()[j]):
 					value = round(self.yMatrix.full()[j][i], 4)
-				cell = self.__createCell(
-					row=i+1, column=j+1+offset, width=colWidth, color=COMMON_CELL_COLOR, value=value)
+				cell = self.__createCell(row=i+1, column=j+1+offset, width=colWidth, color=COMMON_CELL_COLOR, value=value)
 				col.append(cell)
 			self.yFields.append(col)
+	
+	def __updateYFields(self):
+		for j in range(self.yMatrix.colsCount):
+			for i in range(self.yMatrix.rowsCount):
+				value = None
+				if len(self.yMatrix.full()[j]):
+					value = round(self.yMatrix.full()[j][i], 4)
+					self.yFields[j][i].config(state='normal', readonlybackground=COMMON_CELL_COLOR)
+					self.yFields[j][i].delete(0, END)
+					self.yFields[j][i].insert(0, value)
+					self.yFields[j][i].config(state='readonly', readonlybackground=COMMON_CELL_COLOR)
 
 	def __makeNormalFactorMatrixNatural(self, normFactorMatrix):
 		naturFactorMatrix = []
-		# print(normFactorMatrix)
 		for i in range(len(normFactorMatrix)):
 			row = []
 			for j in range(len(normFactorMatrix[0])):
@@ -419,8 +457,7 @@ class PlanningMatrix:
 
 			self.normFactorMatrix = self.__makeNaturalFactorMatrixNormal(self.naturFactorMatrix)
 			self.xMatrix.setRowFactors(self.normFactorMatrix)
-			self.__destroyXFields()
-			self.__createXFields()
+			self.__updateXFields()
 
 		if not self.rowMode:
 			self.normFactorMatrix = self.xMatrix.factor()
@@ -435,18 +472,41 @@ class PlanningMatrix:
 			coefs.append(coef / self.xMatrix.rowsCount)
 		return coefs
 
-	def calculateInterval(self):
+	def calculate(self):
 		self.yMatrix.calculateY(factorMatrix=self.naturFactorMatrix, time=100, genTimeGeneratorType=self.genTimeGeneratorType, procTimeGeneratorType=self.procTimeGeneratorType)
-		self.__destroyYFields()
 
-		normNonLinearCoefs = self.calculateNormNonLinearCoefs()
-		normLinearCoefs = normNonLinearCoefs[:(self.factorsCount + 1)]
+		self.normNonLinearCoefs = self.calculateNormNonLinearCoefs()
+		self.normLinearCoefs = self.normNonLinearCoefs[:(self.factorsCount + 1)]
 		
-		self.yMatrix.calculateYLinear(normLinearCoefs, self.xMatrix.main)
-		self.yMatrix.calculateYNonLinear(normNonLinearCoefs, self.xMatrix.full())
+		self.yMatrix.calculateYLinear(self.normLinearCoefs, self.xMatrix.main)
+		self.yMatrix.calculateYNonLinear(self.normNonLinearCoefs, self.xMatrix.full())
 		self.yMatrix.calculateDeltaLinear()
 		self.yMatrix.calculateDeltaNonLinear()
-		self.__createYFields()
+		self.__updateYFields()
+		self.__updateXFields()
+
+	def __getStr(self, value):
+		string = str(round(value, 3))
+		if string == "0.0":
+			return "0"
+		else:
+			return string
+	
+	def __getEquation(self, coefs):
+		equation = "y = "
+		for i, coef in enumerate(coefs):
+			if coef >= 0: sign = "+"
+			else: sign = "-"
+
+			if i != 0: equation += sign
+			equation += self.__getStr(abs(coef)) + self.xMatrix.labels[i]
+		return equation
+
+	def getNormalLinearEquation(self):
+		return self.__getEquation(self.normLinearCoefs)
+			
+	def getNormalNonLinearEquation(self):
+		return self.__getEquation(self.normNonLinearCoefs)
 
 @dataclass
 class IntervalDataBlock:
@@ -481,7 +541,7 @@ class IntervalDataBlock:
 		self.window = window
 		self.column, self.row, self.columnspan, self.rowspan, self.padx, self.pady = column, row, columnspan, rowspan, padx, pady
 
-		self.frame = self.__createFrame(window, row=row, column=column, rowspan=rowspan, columnspan=columnspan, text="Интервал:")
+		self.frame = self.__createFrame(window, row=row, column=column, rowspan=rowspan, columnspan=columnspan, sticky=NSEW, text="Интервал:")
 
 		self.genIntensityField = self.genRangeField = self.procIntensityField = self.procRangeField = None
 
@@ -489,7 +549,7 @@ class IntervalDataBlock:
 		for i, type in enumerate(timeGeneratorsTypes):
 			if i == 0: frameText = "Поступление заявок:"
 			elif i == 1: frameText = "Обработка заявок:"
-			frame = self.__createFrame(self.frame, row=1, column=i+1, text=frameText)
+			frame = self.__createFrame(self.frame, row=1, column=i, sticky=NSEW, text=frameText)
 
 			label = self.__getTimeGeneratorLabel(type)
 
@@ -519,19 +579,17 @@ class IntervalDataBlock:
 				if i == 0: self.genRangeField = (txtRangeMin, txtRangeMax)
 				elif i == 1: self.procRangeField = (txtRangeMin, txtRangeMax)
 
-			print(self.genIntensityField, self.procIntensityField, self.genRangeField, self.procRangeField)
-
 	def __createEntry(self, window, row=0, column=0, sticky=NSEW, value=None):
 		entry = Entry(window, width=ENTRY_CELL_WIDTH)
 		if value != None: entry.insert(0, str(value))
 		entry.grid(row=row, column=column, sticky=sticky)
 		return entry
 			
-	def __createFrame(self, window, row=0, column=0, columnspan=1, rowspan=1, text=None):
+	def __createFrame(self, window, row=0, column=0, columnspan=1, rowspan=1, sticky=NSEW, text=None):
 		if text != None: frame = LabelFrame(window, text=text)
 		else: frame = Frame(window)
 
-		frame.grid(row=row, column=column, columnspan=columnspan, rowspan=rowspan, sticky=NS, padx=10, pady=10)
+		frame.grid(row=row, column=column, columnspan=columnspan, rowspan=rowspan, sticky=sticky, padx=10, pady=10)
 		frame.grid_rowconfigure(0, weight=1)
 		frame.grid_columnconfigure(0, weight=1)
 
@@ -609,7 +667,7 @@ class PointDataBlock:
 		self.window = window
 		self.column, self.row, self.columnspan, self.rowspan, self.padx, self.pady = column, row, columnspan, rowspan, padx, pady
 
-		self.frame = self.__createFrame(window, row=row, column=column, rowspan=rowspan, columnspan=columnspan, text="Точка:")
+		self.frame = self.__createFrame(window, row=row, column=column, rowspan=rowspan, columnspan=columnspan, sticky=NSEW, text="Точка:")
 
 		self.genIntensityField = self.genRangeField = self.procIntensityField = self.procRangeField = None
 
@@ -617,7 +675,7 @@ class PointDataBlock:
 		for i, type in enumerate(timeGeneratorsTypes):
 			if i == 0: frameText = "Поступление заявок:"
 			elif i == 1: frameText = "Обработка заявок:"
-			frame = self.__createFrame(self.frame, row=1, column=i+1, text=frameText)
+			frame = self.__createFrame(self.frame, row=1, column=i, sticky=NSEW, text=frameText)
 
 			label = self.__getTimeGeneratorLabel(type)
 
@@ -648,14 +706,13 @@ class PointDataBlock:
 		entry.grid(row=row, column=column, sticky=sticky)
 		return entry
 			
-	def __createFrame(self, window, row=0, column=0, columnspan=1, rowspan=1, text=None):
+	def __createFrame(self, window, row=0, column=0, columnspan=1, rowspan=1, sticky=NSEW, text=None):
 		if text != None: frame = LabelFrame(window, text=text)
 		else: frame = Frame(window)
 
-		frame.grid(row=row, column=column, columnspan=columnspan, rowspan=rowspan, sticky=NS, padx=10, pady=10)
+		frame.grid(row=row, column=column, columnspan=columnspan, rowspan=rowspan, sticky=sticky, padx=10, pady=10)
 		frame.grid_rowconfigure(0, weight=1)
 		frame.grid_columnconfigure(0, weight=1)
-
 		return frame
 		
 	def __getTimeGeneratorLabel(self, timeGeneratorType: any):
@@ -669,7 +726,7 @@ class PointDataBlock:
 		factors = []
 		for field in [self.genIntensityField, self.procIntensityField, self.genRangeField, self.procRangeField]:
 			if field != None:
-				if field[0].get() != "" and field[1].get() != "":
+				if field.get() != "" and field.get() != "":
 					factors.append(float(field.get()))
 				else:
 					factors.append(None)
@@ -689,18 +746,56 @@ class PointDataBlock:
 			self.procRangeField.delete(0, END)
 			self.procRangeField.insert(0, str(range))
 
+def calculate(planningMatrix):
+	global intervalDataBlock, pointDataBlock
 
-def calculateInterval(planningMatrix):
-	planningMatrix.calculateInterval()
+	intervals = intervalDataBlock.factors()
+	if planningMatrix.rowMode:
+		points = pointDataBlock.factors()
+		planningMatrix.setFactors(intervals=intervals, points=points)
+	else:
+		planningMatrix.setFactors(intervals=intervals)
 
-# def calculatePoint(planniMatrix):
-# 	pass
+	planningMatrix.calculate()
 
+	if not planningMatrix.rowMode:
+		normLinearEquation = planningMatrix.getNormalLinearEquation()
+		normNonLinearEquation = planningMatrix.getNormalNonLinearEquation()
+		equations = [normLinearEquation, normNonLinearEquation, "", ""]
+		for i, eqLabel in enumerate(EQUATION_LABELS):
+			insertEquation(i+1, eqLabel, equations[i])
+
+def insertEquation(index: int, equationLabel: str, equation: str):
+	global eqText
+
+	eqText.delete("{}.{}".format(index, len(equationLabel)), "{}.end".format(index))
+	eqText.insert("{}.{}".format(index, len(equationLabel)), equation)
+
+	eqIndex = equation.find("=")
+	if eqIndex != -1 and equation[eqIndex] == " ": eqIndex += 1
+
+	if eqIndex != -1:
+		xStartPos = len(equationLabel)
+		xEndPos = xStartPos + eqIndex + 1
+		eqText.tag_add('x', "{}.{}".format(index, xStartPos), '{}.{}'.format(index, xEndPos))
+		eqText.tag_config('x', font=EQUATION_FONT, foreground=EQUATION_X_FOREGROUND, background=EQUATION_X_BACKGROUND)
+
+	for i, sym in enumerate(equation):
+		if sym == 'x':
+			xStartPos = len(equationLabel) + i
+			xEndPos = xStartPos + 2
+			eqText.tag_add('x' + str(i), "{}.{}".format(index, xStartPos), '{}.{}'.format(index, xEndPos))
+			eqText.tag_config('x' + str(i), font=EQUATION_FONT, foreground=EQUATION_X_FOREGROUND, background=EQUATION_X_BACKGROUND)
+		elif eqIndex != -1 and i > eqIndex:
+			xStartPos = len(equationLabel) + i + 1
+			xEndPos = xStartPos + 2
+			eqText.tag_add('x' + str(i), "{}.{}".format(index, xStartPos), '{}.{}'.format(index, xEndPos))
+			eqText.tag_config('x' + str(i), font=EQUATION_FONT, foreground=EQUATION_COEF_FOREGROUND, background=EQUATION_COEF_BACKGROUND)
 
 window = Tk()
 
 window.title('Лабораторная работа №2')
-window.resizable(False, False)
+window.grid_propagate()
 
 intervalDataBlock = IntervalDataBlock(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
 intervalDataBlock.grid(window=window, row=0, column=0, rowspan=1)
@@ -749,59 +844,36 @@ elif genTimeGeneratorParamsCount == 2 and procTimeGeneratorParamsCount == 2:
 	pointDataBlock.setProcFactors(points[1], points[3])
 
 mtrx = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
-mtrx.grid(window=window, row=3, column=0, columnspan=2)
+mtrx.grid(window=window, row=2, column=0, columnspan=2)
 mtrx.setFactors(intervals=intervals)
-calculateInterval(mtrx)
-
 
 mtrxRow = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE, True)
-mtrxRow.grid(window=window, row=4, column=0, columnspan=2)
+mtrxRow.grid(window=window, row=3, column=0, columnspan=2)
 mtrxRow.setFactors(intervals=intervals, points=points)
-calculateInterval(mtrxRow)
-				
-# mtrx2 = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
-# mtrx2.grid(window=window, row=1, column=0, columnspan=2)
-# mtrx2.setFactors([Interval(1, 20), Interval(50, 100)])
-# calculateInterval(mtrx2)
 
-# mtrx2Row = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE, True)
-# mtrx2Row.grid(window=window, row=2, column=0, columnspan=2)
-# mtrx2Row.setFactors([Interval(1, 20), Interval(50, 100)], [10.5, 75])
-# calculateInterval(mtrx2Row)
+btnInterval = Button(window, text="Вычислить", command=lambda:calculate(mtrx))
+btnInterval.grid(row=1, column=0, sticky=EW)
 
+btnInterval = Button(window, text="Вычислить", command=lambda:calculate(mtrxRow))
+btnInterval.grid(row=1, column=1, sticky=EW)
 
-# intervals = [Interval(1, 10), Interval(15, 90), Interval(5, 10)]
-# points = [i.min + (i.max - i.min) / 2 for i in intervals]
+frameEquation = LabelFrame(window, text="Уравнения:")
+frameEquation.grid(row=4, column=0, columnspan=2, sticky=NSEW, padx=10, pady=10)
+frameEquation.grid_rowconfigure(0, weight=1)
+frameEquation.grid_columnconfigure(0, weight=1)
 
+scrollbar = Scrollbar(frameEquation, orient='horizontal')
+scrollbar.grid(row=1, column=0, sticky=EW)
 
-# intervalDataBlock3 = IntervalDataBlock(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
-# intervalDataBlock3.grid(window=window, row=0, column=0, rowspan=1)
-# intervalDataBlock3.setGenFactors(intensity=intervals[0])
-# intervalDataBlock3.setProcFactors(intensity=intervals[1], range=intervals[2])
+eqText = Text(frameEquation, height=5, font=('Arial', 15), wrap="none", xscrollcommand=scrollbar.set)
+eqText.grid(row=0, column=0, sticky=NSEW)
 
-# pointDataBlock3 = PointDataBlock(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
-# pointDataBlock3.grid(window=window, row=0, column=1, rowspan=1)
-# pointDataBlock3.setGenFactors(points[0])
-# pointDataBlock3.setProcFactors(points[1], points[2])
+for eqLabel in EQUATION_LABELS:
+	eqText.insert('end', eqLabel + '\n')
 
-# mtrx3 = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE)
-# mtrx3.grid(window=window, row=3, column=0, columnspan=2)
-# mtrx3.setFactors(intervals=intervals)
-# calculateInterval(mtrx3)
+scrollbar.config(command=eqText.xview)
 
-# mtrx3Row = PlanningMatrix(GEN_TIME_GENERATOR_TYPE, PROC_TIME_GENERATOR_TYPE, True)
-# mtrx3Row.grid(window=window, row=4, column=0, columnspan=2)
-# mtrx3Row.setFactors(intervals=intervals, points=points)
-# calculateInterval(mtrx3Row)
-
-# mtrx4 = PlanningMatrix(UniformTimeGenerator, UniformTimeGenerator)
-# mtrx4.grid(window=window, row=5, column=0, columnspan=2)
-# mtrx4.setFactors([Interval(1, 20), Interval(50, 100), Interval(5, 10), Interval(5, 10)])
-# calculateInterval(mtrx4)
-
-# mtrx4Row = PlanningMatrix(UniformTimeGenerator, UniformTimeGenerator, True)
-# mtrx4Row.grid(window=window, row=6, column=0, columnspan=2)
-# mtrx4Row.setFactors([Interval(1, 20), Interval(50, 100), Interval(5, 10), Interval(5, 10)], [10.5, 75, 7.5, 7.5])
-# calculateInterval(mtrx4Row)
+calculate(mtrx)
+calculate(mtrxRow)
 
 window.mainloop()
