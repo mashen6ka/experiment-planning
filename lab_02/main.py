@@ -1,11 +1,22 @@
-from tkinter import *
-import numpy as np
-from algs import Model, UniformTimeGenerator, RayleighTimeGenerator, ExponentialTimeGenerator, WeibullTimeGenerator, NormalTimeGenerator, RequestGenerator, RequestProcessor
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from itertools import combinations, product
+from tkinter import *
 
-GEN_TIME_GENERATOR_TYPE = RayleighTimeGenerator
-PROC_TIME_GENERATOR_TYPE = UniformTimeGenerator
+from algs import (
+	Model,
+	UniformTimeGenerator,
+	RayleighTimeGenerator,
+	ExponentialTimeGenerator,
+	WeibullTimeGenerator,
+	NormalTimeGenerator,
+	RequestGenerator,
+	RequestProcessor,
+	TimeGenerator
+)
+
+GEN_TIME_GENERATOR_TYPE = NormalTimeGenerator
+PROC_TIME_GENERATOR_TYPE = NormalTimeGenerator
 
 ONE_PARAM_GENERATOR_TYPES = [RayleighTimeGenerator, ExponentialTimeGenerator, WeibullTimeGenerator]
 TWO_PARAMS_GENERATOR_TYPES = [UniformTimeGenerator, NormalTimeGenerator]
@@ -87,7 +98,7 @@ class YMatrix:
 			result = model.simulateEventBased(time)
 			lambdaReal = 1 / (result.generators[0].totalGenerationTime / result.generators[0].totalRequests)
 			muReal = 1 / (result.processors[0].totalProcessingTime / result.processors[0].totalRequests)
-		
+
 			systemLoadReal = lambdaReal / muReal
 			self.y.append(systemLoadReal)
 
@@ -96,7 +107,7 @@ class YMatrix:
 		for i, val in enumerate(x):
 			y += coefs[i] * val
 		return y
-	
+
 	def calculateYLinear(self, linearEqCoefs: list[float], xMatrixMain: list[list[int]]):
 		self.yLinear = []
 		for i in range (len(xMatrixMain[0])):
@@ -183,7 +194,7 @@ class XMatrix:
 				else:
 					val = [p[i-1] for p in prod]
 				self.main.append(val)
-	
+
 	def __initCombs(self):
 		self.combs = []
 		idx = [i + 1 for i in range(self.factorsCount)]
@@ -273,8 +284,6 @@ class PlanningMatrix:
 
 	normLinearCoefs: list[float]
 	normNonLinearCoefs: list[float]
-	naturLinearCoefs: list[float]
-	normNonLinearCoefs: list[float]
 
 	intervals: list[Interval]
 	points: list[float]
@@ -282,12 +291,13 @@ class PlanningMatrix:
 	xFields: list[Entry]
 	yFields: list[Entry]
 
-	genTimeGeneratorType: any
-	procTimeGeneratorType: any
+	genTimeGeneratorType: TimeGenerator
+	procTimeGeneratorType: TimeGenerator
 
 	rowMode: bool
 
-	def __init__(self, genTimeGeneratorType: any, procTimeGeneratorType: any, rowMode: bool = False):
+	def __init__(self, genTimeGeneratorType: TimeGenerator, procTimeGeneratorType: TimeGenerator, rowMode: bool = False):
+
 		self.factorsCount = countFactorsByGeneratorType(genTimeGeneratorType) + countFactorsByGeneratorType(procTimeGeneratorType)
 		self.xColsCount = 2 ** self.factorsCount
 		self.yColsCount = 5
@@ -347,6 +357,7 @@ class PlanningMatrix:
 	def __clearXFields(self):
 		for i in range(len(self.xFields)):
 			for j in range(len(self.xFields[0])):
+				print(f"{i=}, {j=}")
 				self.xFields[i][j].config(state='normal', readonlybackground=COMMON_CELL_COLOR)
 				self.xFields[i][j].delete(0, END)
 				self.xFields[i][j].config(state='readonly', readonlybackground=COMMON_CELL_COLOR)
@@ -376,7 +387,7 @@ class PlanningMatrix:
 		for i in range(len(self.yFields)):
 			for j in range(len(self.yFields[0])):
 				self.yFields[i][j].destroy()
-	
+
 	def __clearYFields(self):
 		for i in range(len(self.yFields)):
 			for j in range(len(self.yFields[0])):
@@ -406,7 +417,7 @@ class PlanningMatrix:
 				cell = self.__createCell(row=i+1, column=j+1+offset, width=colWidth, color=COMMON_CELL_COLOR, value=value)
 				col.append(cell)
 			self.yFields.append(col)
-	
+
 	def __updateYFields(self):
 		for j in range(self.yMatrix.colsCount):
 			for i in range(self.yMatrix.rowsCount):
@@ -429,7 +440,7 @@ class PlanningMatrix:
 				row.append(naturValue)
 			naturFactorMatrix.append(row)
 		return naturFactorMatrix
-	
+
 	def __makeNaturalFactorMatrixNormal(self, naturFactorMatrix):
 		normFactorMatrix = []
 		for i in range(len(naturFactorMatrix)):
@@ -462,8 +473,8 @@ class PlanningMatrix:
 		if not self.rowMode:
 			self.normFactorMatrix = self.xMatrix.factor()
 			self.naturFactorMatrix = self.__makeNormalFactorMatrixNatural(self.normFactorMatrix)
-		
-	def calculateNormNonLinearCoefs(self):
+
+	def calculateNormNonLinearCoefs(self) -> list[float]:
 		coefs = []
 		for j in range(self.xMatrix.colsCount):
 			coef = 0
@@ -472,12 +483,134 @@ class PlanningMatrix:
 			coefs.append(coef / self.xMatrix.rowsCount)
 		return coefs
 
+	def normal_coeffs_to_natural_linear(self, an: Sequence[float]) -> tuple[
+		float, float, float, float, float]:
+
+		X_MIN = (None, *[interval.min for interval in self.intervals])
+		X_MAX = (None, *[interval.max for interval in self.intervals])
+
+		dx = [None, *[(X_MAX[i] - X_MIN[i]) / 2 for i in range(1, 5)]]
+		xc = [None, *[(X_MAX[i] + X_MIN[i]) / 2 for i in range(1, 5)]]
+
+		return (
+			an[0] - xc[1] * (an[1] / dx[1]) - xc[2] * (an[2] / dx[2]) - xc[
+				3] * (an[3] / dx[3]) - xc[4] * (an[4] / dx[4]),
+			(an[1] / dx[1]),
+			(an[2] / dx[2]),
+			(an[3] / dx[3]),
+			(an[4] / dx[4]),
+		)
+
+	def normal_coeffs_to_natural_non_linear(self, an: Sequence[float]) -> tuple[
+		float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float
+	]:
+		# intervals = self.intervals
+		X_MIN = (None, *[interval.min for interval in self.intervals])
+		X_MAX = (None, *[interval.max for interval in self.intervals])
+
+		dx = [None, *[(X_MAX[i] - X_MIN[i]) / 2 for i in range(1, 5)]]
+		xc = [None, *[(X_MAX[i] + X_MIN[i]) / 2 for i in range(1, 5)]]
+
+		# helper for x_i(0) / delta_x_i
+		def k(i: int) -> float:
+			return xc[i] / dx[i]
+
+		return (
+			(an[0]
+			 - an[1] * k(1)
+			 - an[2] * k(2)
+			 - an[3] * k(3)
+			 - an[4] * k(4)
+			 + an[5] * k(1) * k(2)
+			 + an[6] * k(1) * k(3)
+			 + an[7] * k(1) * k(4)
+			 + an[8] * k(2) * k(3)
+			 + an[9] * k(2) * k(4)
+			 + an[10] * k(3) * k(4)
+			 - an[11] * k(1) * k(2) * k(3)
+			 - an[12] * k(1) * k(2) * k(4)
+			 - an[13] * k(1) * k(3) * k(4)
+			 - an[14] * k(2) * k(3) * k(4)
+			 + an[15] * k(1) * k(2) * k(3) * k(4)
+			 ),
+			(an[1]
+			 - an[5] * k(2)
+			 - an[6] * k(3)
+			 - an[7] * k(4)
+			 + an[11] * k(2) * k(3)
+			 + an[12] * k(2) * k(4)
+			 + an[13] * k(3) * k(4)
+			 - an[15] * k(2) * k(3) * k(4)
+			 ) / dx[1],
+			(an[2]
+			 - an[5] * k(1)
+			 - an[8] * k(3)
+			 - an[9] * k(4)
+			 + an[11] * k(1) * k(3)
+			 + an[12] * k(1) * k(4)
+			 + an[14] * k(3) * k(4)
+			 - an[15] * k(1) * k(3) * k(4)
+			 ) / dx[2],
+			(an[3]
+			 - an[6] * k(1)
+			 - an[8] * k(2)
+			 - an[10] * k(4)
+			 + an[11] * k(1) * k(2)
+			 + an[13] * k(1) * k(4)
+			 + an[14] * k(2) * k(4)
+			 - an[15] * k(1) * k(2) * k(4)
+			 ) / dx[3],
+			(an[4]
+			 - an[7] * k(1)
+			 - an[9] * k(2)
+			 - an[10] * k(3)
+			 + an[12] * k(1) * k(2)
+			 + an[13] * k(1) * k(3)
+			 + an[14] * k(2) * k(3)
+			 - an[15] * k(1) * k(2) * k(3)
+			 ) / dx[4],
+			(an[5]
+			 - an[11] * k(3)
+			 - an[12] * k(4)
+			 + an[15] * k(3) * k(4)
+			 ) / dx[1] / dx[2],
+			(an[6]
+			 - an[11] * k(2)
+			 - an[13] * k(4)
+			 + an[15] * k(2) * k(4)
+			 ) / dx[1] / dx[3],
+			(an[7]
+			 - an[12] * k(2)
+			 - an[13] * k(3)
+			 + an[15] * k(2) * k(3)
+			 ) / dx[1] / dx[4],
+			(an[8]
+			 - an[11] * k(1)
+			 - an[14] * k(4)
+			 + an[15] * k(1) * k(4)
+			 ) / dx[2] / dx[3],
+			(an[9]
+			 - an[12] * k(1)
+			 - an[14] * k(3)
+			 + an[15] * k(1) * k(3)
+			 ) / dx[2] / dx[4],
+			(an[10]
+			 - an[13] * k(1)
+			 - an[14] * k(2)
+			 + an[15] * k(1) * k(2)
+			 ) / dx[3] / dx[4],
+			(an[11] - an[15] * k(4)) / dx[1] / dx[2] / dx[3],
+			(an[12] - an[15] * k(3)) / dx[1] / dx[2] / dx[4],
+			(an[13] - an[15] * k(2)) / dx[1] / dx[3] / dx[4],
+			(an[14] - an[15] * k(1)) / dx[2] / dx[3] / dx[4],
+			an[15] / dx[1] / dx[2] / dx[3] / dx[4],
+		)
 	def calculate(self):
 		self.yMatrix.calculateY(factorMatrix=self.naturFactorMatrix, time=100, genTimeGeneratorType=self.genTimeGeneratorType, procTimeGeneratorType=self.procTimeGeneratorType)
 
 		self.normNonLinearCoefs = self.calculateNormNonLinearCoefs()
 		self.normLinearCoefs = self.normNonLinearCoefs[:(self.factorsCount + 1)]
-		
+
 		self.yMatrix.calculateYLinear(self.normLinearCoefs, self.xMatrix.main)
 		self.yMatrix.calculateYNonLinear(self.normNonLinearCoefs, self.xMatrix.full())
 		self.yMatrix.calculateDeltaLinear()
@@ -486,27 +619,36 @@ class PlanningMatrix:
 		self.__updateXFields()
 
 	def __getStr(self, value):
-		string = str(round(value, 3))
-		if string == "0.0":
-			return "0"
-		else:
-			return string
+		return str(round(value, 3) or round(value, 4) or 0)
+		# string = str(round(value, 2))
+		# if string == "0.0":
+		# 	return "0"
+		# else:
+		# 	return string
 	
 	def __getEquation(self, coefs):
 		equation = "y = "
 		for i, coef in enumerate(coefs):
-			if coef >= 0: sign = "+"
-			else: sign = "-"
-
+			sign = "+" if coef >= 0 else "-"
 			if i != 0: equation += sign
 			equation += self.__getStr(abs(coef)) + self.xMatrix.labels[i]
 		return equation
 
 	def getNormalLinearEquation(self):
 		return self.__getEquation(self.normLinearCoefs)
-			
+
 	def getNormalNonLinearEquation(self):
 		return self.__getEquation(self.normNonLinearCoefs)
+
+	def getNaturalNonLinearEquation(self):
+		natural_non_linear_coeffs = self.normal_coeffs_to_natural_non_linear(self.normNonLinearCoefs)
+		print(f"{natural_non_linear_coeffs=}")
+		return self.__getEquation(natural_non_linear_coeffs)
+
+	def getNaturalLinearEquation(self):
+		natural_linear_coeffs = self.normal_coeffs_to_natural_linear(self.normLinearCoefs)
+		print(f"{natural_linear_coeffs=}")
+		return self.__getEquation(natural_linear_coeffs)
 
 @dataclass
 class IntervalDataBlock:
@@ -584,7 +726,7 @@ class IntervalDataBlock:
 		if value != None: entry.insert(0, str(value))
 		entry.grid(row=row, column=column, sticky=sticky)
 		return entry
-			
+
 	def __createFrame(self, window, row=0, column=0, columnspan=1, rowspan=1, sticky=NSEW, text=None):
 		if text != None: frame = LabelFrame(window, text=text)
 		else: frame = Frame(window)
@@ -594,7 +736,7 @@ class IntervalDataBlock:
 		frame.grid_columnconfigure(0, weight=1)
 
 		return frame
-		
+
 	def __getTimeGeneratorLabel(self, timeGeneratorType: any):
 		if timeGeneratorType is NormalTimeGenerator: return 'Нормальный закон'
 		elif timeGeneratorType is ExponentialTimeGenerator: return 'Экспоненциальный закон'
@@ -611,7 +753,7 @@ class IntervalDataBlock:
 				else:
 					factors.append(None)
 		return factors
-	
+
 	def setGenFactors(self, intensity: Interval, range: Interval = None):
 		self.genIntensityField[0].delete(0, END)
 		self.genIntensityField[1].delete(0, END)
@@ -705,7 +847,7 @@ class PointDataBlock:
 		if value != None: entry.insert(0, str(value))
 		entry.grid(row=row, column=column, sticky=sticky)
 		return entry
-			
+
 	def __createFrame(self, window, row=0, column=0, columnspan=1, rowspan=1, sticky=NSEW, text=None):
 		if text != None: frame = LabelFrame(window, text=text)
 		else: frame = Frame(window)
@@ -714,7 +856,7 @@ class PointDataBlock:
 		frame.grid_rowconfigure(0, weight=1)
 		frame.grid_columnconfigure(0, weight=1)
 		return frame
-		
+
 	def __getTimeGeneratorLabel(self, timeGeneratorType: any):
 		if timeGeneratorType is NormalTimeGenerator: return 'Нормальный закон'
 		elif timeGeneratorType is ExponentialTimeGenerator: return 'Экспоненциальный закон'
@@ -731,7 +873,7 @@ class PointDataBlock:
 				else:
 					factors.append(None)
 		return factors
-	
+
 	def setGenFactors(self, intensity: Interval, range: Interval = None):
 		self.genIntensityField.delete(0, END)
 		self.genIntensityField.insert(0, str(intensity))
@@ -746,7 +888,7 @@ class PointDataBlock:
 			self.procRangeField.delete(0, END)
 			self.procRangeField.insert(0, str(range))
 
-def calculate(planningMatrix):
+def calculate(planningMatrix: PlanningMatrix):
 	global intervalDataBlock, pointDataBlock
 
 	intervals = intervalDataBlock.factors()
@@ -759,9 +901,12 @@ def calculate(planningMatrix):
 	planningMatrix.calculate()
 
 	if not planningMatrix.rowMode:
-		normLinearEquation = planningMatrix.getNormalLinearEquation()
-		normNonLinearEquation = planningMatrix.getNormalNonLinearEquation()
-		equations = [normLinearEquation, normNonLinearEquation, "", ""]
+		equations = (
+			planningMatrix.getNormalLinearEquation(),
+			planningMatrix.getNormalNonLinearEquation(),
+			planningMatrix.getNaturalLinearEquation(),
+			planningMatrix.getNaturalNonLinearEquation()
+		)
 		for i, eqLabel in enumerate(EQUATION_LABELS):
 			insertEquation(i+1, eqLabel, equations[i])
 
@@ -772,25 +917,29 @@ def insertEquation(index: int, equationLabel: str, equation: str):
 	eqText.insert("{}.{}".format(index, len(equationLabel)), equation)
 
 	eqIndex = equation.find("=")
-	if eqIndex != -1 and equation[eqIndex] == " ": eqIndex += 1
+	if eqIndex != -1 and equation[eqIndex] == " ":
+		eqIndex += 1
 
 	if eqIndex != -1:
 		xStartPos = len(equationLabel)
 		xEndPos = xStartPos + eqIndex + 1
-		eqText.tag_add('x', "{}.{}".format(index, xStartPos), '{}.{}'.format(index, xEndPos))
+		eqText.tag_add('x', f"{index}.{xStartPos}", f'{index}.{xEndPos}')
 		eqText.tag_config('x', font=EQUATION_FONT, foreground=EQUATION_X_FOREGROUND, background=EQUATION_X_BACKGROUND)
 
 	for i, sym in enumerate(equation):
+		tag_name = f"x{i}"
+
 		if sym == 'x':
 			xStartPos = len(equationLabel) + i
 			xEndPos = xStartPos + 2
-			eqText.tag_add('x' + str(i), "{}.{}".format(index, xStartPos), '{}.{}'.format(index, xEndPos))
-			eqText.tag_config('x' + str(i), font=EQUATION_FONT, foreground=EQUATION_X_FOREGROUND, background=EQUATION_X_BACKGROUND)
+			eqText.tag_add(tag_name, f"{index}.{xStartPos}", f'{index}.{xEndPos}')
+			eqText.tag_config(tag_name, font=EQUATION_FONT, foreground=EQUATION_X_FOREGROUND, background=EQUATION_X_BACKGROUND)
 		elif eqIndex != -1 and i > eqIndex:
 			xStartPos = len(equationLabel) + i + 1
 			xEndPos = xStartPos + 2
-			eqText.tag_add('x' + str(i), "{}.{}".format(index, xStartPos), '{}.{}'.format(index, xEndPos))
-			eqText.tag_config('x' + str(i), font=EQUATION_FONT, foreground=EQUATION_COEF_FOREGROUND, background=EQUATION_COEF_BACKGROUND)
+			tag_name = f"x{i}"
+			eqText.tag_add(tag_name, f"{index}.{xStartPos}", f'{index}.{xEndPos}')
+			eqText.tag_config(tag_name, font=EQUATION_FONT, foreground=EQUATION_COEF_FOREGROUND, background=EQUATION_COEF_BACKGROUND)
 
 window = Tk()
 

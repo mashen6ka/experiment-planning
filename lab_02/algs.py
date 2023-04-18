@@ -1,3 +1,5 @@
+from typing import Protocol
+
 import numpy.random as nr
 from math import pi
 import enum
@@ -5,6 +7,10 @@ from queue import PriorityQueue
 
 REQUEST_COUNT = 10000
 DELTA_T = 0.01
+
+class TimeGenerator(Protocol):
+  def randomTime(self):
+    ...
 
 class UniformTimeGenerator:
   def __init__(self, intensity, intensityRange):
