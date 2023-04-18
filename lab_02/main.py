@@ -15,8 +15,8 @@ from algs import (
 	TimeGenerator
 )
 
-GEN_TIME_GENERATOR_TYPE = NormalTimeGenerator
-PROC_TIME_GENERATOR_TYPE = NormalTimeGenerator
+GEN_TIME_GENERATOR_TYPE = RayleighTimeGenerator
+PROC_TIME_GENERATOR_TYPE = UniformTimeGenerator
 
 ONE_PARAM_GENERATOR_TYPES = [RayleighTimeGenerator, ExponentialTimeGenerator, WeibullTimeGenerator]
 TWO_PARAMS_GENERATOR_TYPES = [UniformTimeGenerator, NormalTimeGenerator]
@@ -50,7 +50,6 @@ class Combination:
 		self.elems = elems
 		self.value = value
 
-
 @dataclass
 class Interval:
 	min: float
@@ -59,7 +58,6 @@ class Interval:
 	def __init__(self, min, max):
 		self.min = min
 		self.max = max
-
 
 @dataclass
 class YMatrix:
@@ -144,7 +142,6 @@ class YMatrix:
 
 	def full(self):
 		return [self.y, self.yLinear, self.yNonLinear, self.deltaLinear, self.deltaNonLinear]
-
 
 @dataclass
 class XMatrix:
@@ -482,8 +479,39 @@ class PlanningMatrix:
 				coef += self.xMatrix.full()[j][i] * self.yMatrix.y[i]
 			coefs.append(coef / self.xMatrix.rowsCount)
 		return coefs
+	
+	def normalCoefsToNaturalLinear2(self, an: Sequence[float]) -> tuple[
+		float, float, float]:
 
-	def normal_coeffs_to_natural_linear(self, an: Sequence[float]) -> tuple[
+		X_MIN = (None, *[interval.min for interval in self.intervals])
+		X_MAX = (None, *[interval.max for interval in self.intervals])
+
+		dx = [None, *[(X_MAX[i] - X_MIN[i]) / 2 for i in range(1, 3)]]
+		xc = [None, *[(X_MAX[i] + X_MIN[i]) / 2 for i in range(1, 3)]]
+
+		return (
+			an[0] - (an[1] * xc[1] / dx[1]) - (an[2] * xc[2] / dx[2]),
+			(an[1] / dx[1]),
+			(an[2] / dx[2]),
+    )
+	
+	def normalCoefsToNaturalLinear3(self, an: Sequence[float]) -> tuple[
+		float, float, float, float]:
+
+		X_MIN = (None, *[interval.min for interval in self.intervals])
+		X_MAX = (None, *[interval.max for interval in self.intervals])
+
+		dx = [None, *[(X_MAX[i] - X_MIN[i]) / 2 for i in range(1, 4)]]
+		xc = [None, *[(X_MAX[i] + X_MIN[i]) / 2 for i in range(1, 4)]]
+
+		return (
+			an[0] - xc[1] * (an[1] / dx[1]) - xc[2] * (an[2] / dx[2]) - xc[3] * (an[3] / dx[3]),
+			(an[1] / dx[1]),
+			(an[2] / dx[2]),
+			(an[3] / dx[3]),
+    )
+
+	def normalCoefsToNaturalLinear4(self, an: Sequence[float]) -> tuple[
 		float, float, float, float, float]:
 
 		X_MIN = (None, *[interval.min for interval in self.intervals])
@@ -501,7 +529,71 @@ class PlanningMatrix:
 			(an[4] / dx[4]),
 		)
 
-	def normal_coeffs_to_natural_non_linear(self, an: Sequence[float]) -> tuple[
+	def normalCoefsToNaturalNonLinear2(self, an: Sequence[float]) -> tuple[
+		float, float, float, float
+	]:
+		X_MIN = (None, *[interval.min for interval in self.intervals])
+		X_MAX = (None, *[interval.max for interval in self.intervals])
+
+		dx = [None, *[(X_MAX[i] - X_MIN[i]) / 2 for i in range(1, 3)]]
+		xc = [None, *[(X_MAX[i] + X_MIN[i]) / 2 for i in range(1, 3)]]
+		
+		def dx_(i: int, j: int) -> float:
+			return dx[i] * dx[j]
+		
+		return (
+			an[0] - (an[1] * xc[1] / dx[1]) - (an[2] * xc[2] / dx[2]) + (an[3] * xc[1] * xc[2] / dx_(1,2)),
+			(an[1] / dx[1]) - (an[3] * xc[2] / dx_(1,2)),
+			(an[2] / dx[2]) - (an[3] * xc[1] / dx_(1,2)),
+			(an[3] / dx_(1,2)),
+    )
+
+	def normalCoefsToNaturalNonLinear3(self, an: Sequence[float]) -> tuple[
+		float, float, float, float, float, float, float, float
+	]:
+
+		X_MIN = (None, *[interval.min for interval in self.intervals])
+		X_MAX = (None, *[interval.max for interval in self.intervals])
+
+		dx = [None, *[(X_MAX[i] - X_MIN[i]) / 2 for i in range(1, 4)]]
+		xc = [None, *[(X_MAX[i] + X_MIN[i]) / 2 for i in range(1, 4)]]
+
+		# helper for x_i(0) / delta_x_i
+		def k(i: int) -> float:
+			return xc[i] / dx[i]
+		
+		return (
+			(an[0]
+			- an[1] * k(1)
+			- an[2] * k(2)
+			- an[3] * k(3)
+			+ an[4] * k(1) * k(2)
+			+ an[5] * k(1) * k(3)
+			+ an[6] * k(2) * k(3)
+			- an[7] * k(1) * k(2) * k(3)
+			),
+			(an[1]
+				- an[4] * k(2)
+				- an[5] * k(3)
+				+ an[7] * k(2) * k(3)
+				) / dx[1],
+			(an[2]
+				- an[4] * k(1)
+				- an[6] * k(3)
+				+ an[7] * k(1) * k(3)
+				) / dx[2],
+			(an[3]
+				- an[5] * k(1)
+				- an[6] * k(2)
+				+ an[7] * k(1) * k(2)
+				) / dx[3],
+			(an[4] - an[7] * k(3)) / dx[1] / dx[2],
+			(an[5] - an[7] * k(2)) / dx[1] / dx[3],
+			(an[6] - an[7] * k(1)) / dx[2] / dx[3],
+			an[7] / dx[1] / dx[2] / dx[3],
+    )
+
+	def normalCoefsToNaturalNonLinear4(self, an: Sequence[float]) -> tuple[
 		float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float
 	]:
 		# intervals = self.intervals
@@ -605,6 +697,26 @@ class PlanningMatrix:
 			(an[14] - an[15] * k(1)) / dx[2] / dx[3] / dx[4],
 			an[15] / dx[1] / dx[2] / dx[3] / dx[4],
 		)
+
+	def normalCoefsToNaturalLinear4(self, an: Sequence[float]) -> tuple[
+		float, float, float, float, float]:
+
+		X_MIN = (None, *[interval.min for interval in self.intervals])
+		X_MAX = (None, *[interval.max for interval in self.intervals])
+
+		dx = [None, *[(X_MAX[i] - X_MIN[i]) / 2 for i in range(1, 5)]]
+		xc = [None, *[(X_MAX[i] + X_MIN[i]) / 2 for i in range(1, 5)]]
+
+		return (
+			an[0] - xc[1] * (an[1] / dx[1]) - xc[2] * (an[2] / dx[2]) - xc[
+				3] * (an[3] / dx[3]) - xc[4] * (an[4] / dx[4]),
+			(an[1] / dx[1]),
+			(an[2] / dx[2]),
+			(an[3] / dx[3]),
+			(an[4] / dx[4]),
+	)
+	
+
 	def calculate(self):
 		self.yMatrix.calculateY(factorMatrix=self.naturFactorMatrix, time=100, genTimeGeneratorType=self.genTimeGeneratorType, procTimeGeneratorType=self.procTimeGeneratorType)
 
@@ -615,6 +727,7 @@ class PlanningMatrix:
 		self.yMatrix.calculateYNonLinear(self.normNonLinearCoefs, self.xMatrix.full())
 		self.yMatrix.calculateDeltaLinear()
 		self.yMatrix.calculateDeltaNonLinear()
+
 		self.__updateYFields()
 		self.__updateXFields()
 
@@ -641,14 +754,28 @@ class PlanningMatrix:
 		return self.__getEquation(self.normNonLinearCoefs)
 
 	def getNaturalNonLinearEquation(self):
-		natural_non_linear_coeffs = self.normal_coeffs_to_natural_non_linear(self.normNonLinearCoefs)
-		print(f"{natural_non_linear_coeffs=}")
-		return self.__getEquation(natural_non_linear_coeffs)
+		if self.genTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES and self.procTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES:
+			naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear2(self.normNonLinearCoefs)
+		if self.genTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES and self.procTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES:
+			naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear3(self.normNonLinearCoefs)
+		if self.genTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES and self.procTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES:
+			naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear3(self.normNonLinearCoefs)
+		if self.genTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES and self.procTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES:
+			naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear4(self.normNonLinearCoefs)
+		print(f"{naturalNonLinearCoefs=}")
+		return self.__getEquation(naturalNonLinearCoefs)
 
 	def getNaturalLinearEquation(self):
-		natural_linear_coeffs = self.normal_coeffs_to_natural_linear(self.normLinearCoefs)
-		print(f"{natural_linear_coeffs=}")
-		return self.__getEquation(natural_linear_coeffs)
+		if self.genTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES and self.procTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES:
+			naturalLinearCoefs = self.normalCoefsToNaturalLinear2(self.normNonLinearCoefs)
+		if self.genTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES and self.procTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES:
+			naturalLinearCoefs = self.normalCoefsToNaturalLinear3(self.normNonLinearCoefs)
+		if self.genTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES and self.procTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES:
+			naturalLinearCoefs = self.normalCoefsToNaturalLinear3(self.normNonLinearCoefs)
+		if self.genTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES and self.procTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES:
+			naturalLinearCoefs = self.normalCoefsToNaturalLinear4(self.normNonLinearCoefs)
+		print(f"{naturalLinearCoefs=}")
+		return self.__getEquation(naturalLinearCoefs)
 
 @dataclass
 class IntervalDataBlock:
