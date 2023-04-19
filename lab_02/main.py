@@ -16,8 +16,8 @@ from algs import (
 		TimeGenerator,
 )
 
-GEN_TIME_GENERATOR_TYPE = NormalTimeGenerator
-PROC_TIME_GENERATOR_TYPE = NormalTimeGenerator
+GEN_TIME_GENERATOR_TYPE = RayleighTimeGenerator
+PROC_TIME_GENERATOR_TYPE = UniformTimeGenerator
 
 ONE_PARAM_GENERATOR_TYPES = [
 		RayleighTimeGenerator,
@@ -47,6 +47,10 @@ EQUATION_X_BACKGROUND = "white"
 EQUATION_COEF_BACKGROUND = "white"
 EQUATION_FONT = ("Courier", 15, "bold")
 
+normLinearCoefs = []
+normNonLinearCoefs = []
+naturLinearCoefs = []
+naturNonLinearCoefs = []
 
 def countFactorsByGeneratorType(genType):
 		if genType in ONE_PARAM_GENERATOR_TYPES:
@@ -109,8 +113,10 @@ class YMatrix:
 				time: int,
 				genTimeGeneratorType: any,
 				procTimeGeneratorType: any,
+
 		):
 				self.y = []
+				# if not self.rowMode:
 				for factors in factorMatrix:
 						genTimeGenerator, procTimeGenerator = self.__initTimeGenerators(
 								factors, genTimeGeneratorType, procTimeGeneratorType
@@ -120,13 +126,7 @@ class YMatrix:
 
 						model = Model([generator], [processor])
 						result = model.simulateEventBased(time)
-						# lambdaReal = 1 / (result.generators[0].totalGenerationTime / result.generators[0].totalRequests)
-						# muReal = 1 / (result.processors[0].totalProcessingTime / result.processors[0].totalRequests)
-
-						# systemLoadReal = lambdaReal / muReal
-						# self.y.append(systemLoadReal)
 						self.y.append(result.processors[0].avgWaitingTime)
-
 
 		def __solveEquation(self, coefs: list[float], x: list[float]):
 				y = 0
@@ -331,8 +331,8 @@ class PlanningMatrix:
 		normFactorMatrix: list[list[int]]
 		naturFactorMatrix: list[list[float]]
 
-		normLinearCoefs: list[float]
-		normNonLinearCoefs: list[float]
+		# normLinearCoefs: list[float]
+		# normNonLinearCoefs: list[float]
 
 		intervals: list[Interval]
 		points: list[float]
@@ -435,7 +435,6 @@ class PlanningMatrix:
 		def __clearXFields(self):
 				for i in range(len(self.xFields)):
 						for j in range(len(self.xFields[0])):
-								print(f"{i=}, {j=}")
 								self.xFields[i][j].config(state="normal", readonlybackground=COMMON_CELL_COLOR)
 								self.xFields[i][j].delete(0, END)
 								self.xFields[i][j].config(state="readonly", readonlybackground=COMMON_CELL_COLOR)
@@ -813,18 +812,21 @@ class PlanningMatrix:
 				)
 
 		def calculate(self):
+				global normLinearCoefs, normNonLinearCoefs
 				self.yMatrix.calculateY(
 						factorMatrix=self.naturFactorMatrix,
 						time=100,
 						genTimeGeneratorType=self.genTimeGeneratorType,
 						procTimeGeneratorType=self.procTimeGeneratorType,
 				)
+				
+				if not self.rowMode:
+					normNonLinearCoefs = self.calculateNormNonLinearCoefs()
+					normLinearCoefs = normNonLinearCoefs[: (self.factorsCount + 1)]
 
-				self.normNonLinearCoefs = self.calculateNormNonLinearCoefs()
-				self.normLinearCoefs = self.normNonLinearCoefs[: (self.factorsCount + 1)]
 
-				self.yMatrix.calculateYLinear(self.normLinearCoefs, self.xMatrix.main)
-				self.yMatrix.calculateYNonLinear(self.normNonLinearCoefs, self.xMatrix.full())
+				self.yMatrix.calculateYLinear(normLinearCoefs, self.xMatrix.main)
+				self.yMatrix.calculateYNonLinear(normNonLinearCoefs, self.xMatrix.full())
 				self.yMatrix.calculateDeltaLinear()
 				self.yMatrix.calculateDeltaNonLinear()
 
@@ -833,11 +835,6 @@ class PlanningMatrix:
 
 		def __getStr(self, value):
 				return str(round(value, 3) or round(value, 4) or 0.0)
-				# string = str(round(value, 2))
-				# if string == "0.0":
-				# 	return "0"
-				# else:
-				# 	return string
 
 		def __getEquation(self, coefs):
 				equation = "y = "
@@ -849,57 +846,59 @@ class PlanningMatrix:
 				return equation
 
 		def getNormalLinearEquation(self):
-				return self.__getEquation(self.normLinearCoefs)
+				global normLinearCoefs
+				return self.__getEquation(normLinearCoefs)
 
 		def getNormalNonLinearEquation(self):
-				return self.__getEquation(self.normNonLinearCoefs)
+				global normNonLinearCoefs
+				return self.__getEquation(normNonLinearCoefs)
 
 		def getNaturalNonLinearEquation(self):
+				global normLinearCoefs, normNonLinearCoefs
 				if (
 						self.genTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES
 						and self.procTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES
 				):
-						naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear2(self.normNonLinearCoefs)
+						naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear2(normNonLinearCoefs)
 				if (
 						self.genTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES
 						and self.procTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES
 				):
-						naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear3(self.normNonLinearCoefs)
+						naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear3(normNonLinearCoefs)
 				if (
 						self.genTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES
 						and self.procTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES
 				):
-						naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear3(self.normNonLinearCoefs)
+						naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear3(normNonLinearCoefs)
 				if (
 						self.genTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES
 						and self.procTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES
 				):
-						naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear4(self.normNonLinearCoefs)
-				print(f"{naturalNonLinearCoefs=}")
+						naturalNonLinearCoefs = self.normalCoefsToNaturalNonLinear4(normNonLinearCoefs)
 				return self.__getEquation(naturalNonLinearCoefs)
 
 		def getNaturalLinearEquation(self):
+				global normLinearCoefs, normNonLinearCoefs
 				if (
 						self.genTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES
 						and self.procTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES
 				):
-						naturalLinearCoefs = self.normalCoefsToNaturalLinear2(self.normNonLinearCoefs)
+						naturalLinearCoefs = self.normalCoefsToNaturalLinear2(normNonLinearCoefs)
 				if (
 						self.genTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES
 						and self.procTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES
 				):
-						naturalLinearCoefs = self.normalCoefsToNaturalLinear3(self.normNonLinearCoefs)
+						naturalLinearCoefs = self.normalCoefsToNaturalLinear3(normNonLinearCoefs)
 				if (
 						self.genTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES
 						and self.procTimeGeneratorType in ONE_PARAM_GENERATOR_TYPES
 				):
-						naturalLinearCoefs = self.normalCoefsToNaturalLinear3(self.normNonLinearCoefs)
+						naturalLinearCoefs = self.normalCoefsToNaturalLinear3(normNonLinearCoefs)
 				if (
 						self.genTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES
 						and self.procTimeGeneratorType in TWO_PARAMS_GENERATOR_TYPES
 				):
-						naturalLinearCoefs = self.normalCoefsToNaturalLinear4(self.normNonLinearCoefs)
-				print(f"{naturalLinearCoefs=}")
+						naturalLinearCoefs = self.normalCoefsToNaturalLinear4(normNonLinearCoefs)
 				return self.__getEquation(naturalLinearCoefs)
 
 
@@ -1228,7 +1227,7 @@ class PointDataBlock:
 
 
 def calculate(planningMatrix: PlanningMatrix):
-		global intervalDataBlock, pointDataBlock
+		global intervalDataBlock, pointDataBlock, normLinearCoefs, normNonLinearCoefs
 
 		intervals = intervalDataBlock.factors()
 		if planningMatrix.rowMode:
@@ -1236,7 +1235,6 @@ def calculate(planningMatrix: PlanningMatrix):
 				planningMatrix.setFactors(intervals=intervals, points=points)
 		else:
 				planningMatrix.setFactors(intervals=intervals)
-
 		planningMatrix.calculate()
 
 		if not planningMatrix.rowMode:
@@ -1314,6 +1312,7 @@ if genTimeGeneratorParamsCount == 1 and procTimeGeneratorParamsCount == 1:
 		pointDataBlock.setGenFactors(points[0])
 		pointDataBlock.setProcFactors(points[1])
 elif genTimeGeneratorParamsCount == 1 and procTimeGeneratorParamsCount == 2:
+		# intervals = [Interval(20, 50), Interval(90, 190), Interval(5, 10)]
 		intervals = [Interval(1, 10), Interval(15, 90), Interval(5, 10)]
 		points = [i.min + (i.max - i.min) / 2 for i in intervals]
 
